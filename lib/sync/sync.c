@@ -29,18 +29,34 @@ void sync_update_led(bool val) {
 #if BUILD_INITIATOR 
 int sync_request_cs(write_func_t write_fn, bool state) {
     int err;
-    for(;;) {
-        while ((err = write_fn(state)) == -EBUSY) k_msleep(1);      
+    int backoff_ms = 4;
+    const int backoff_max_ms = 250;
 
-        if (err) { k_msleep(2);    continue; }
+    for(;;) {
+        while ((err = write_fn(state)) == -EBUSY) {
+            int jitter = (int)(k_cycle_get_32() & 0x7);
+            k_msleep(backoff_ms + jitter);
+            backoff_ms = (backoff_ms < backoff_max_ms) ? (backoff_ms << 1) : backoff_max_ms;
+        }
+
+        if (err) {
+            int jitter = (int)(k_cycle_get_32() & 0x7);
+            k_msleep(backoff_ms + jitter);
+            backoff_ms = (backoff_ms < backoff_max_ms) ? (backoff_ms << 1) : backoff_max_ms;
+            continue;
+        }
 
         k_sem_take(&sync_ctx.sem_write_done, K_FOREVER);
 
         if (sync_ctx.att_err == BT_ATT_ERR_PREPARE_QUEUE_FULL ||
             sync_ctx.att_err == BT_ATT_ERR_UNLIKELY) {
-            k_msleep(2);
+            int jitter = (int)(k_cycle_get_32() & 0x7);
+            k_msleep(backoff_ms + jitter);
+            backoff_ms = (backoff_ms < backoff_max_ms) ? (backoff_ms << 1) : backoff_max_ms;
             continue;
         }
+
+        backoff_ms = 4;
 
         if (sync_ctx.att_err) {  
             printk("LED write failed (ATT 0x%02x)\n", sync_ctx.att_err);

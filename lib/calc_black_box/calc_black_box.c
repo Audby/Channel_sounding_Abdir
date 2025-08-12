@@ -180,8 +180,8 @@ static void process_tone_info_data(struct processing_context *context,
 		    local_tone_info[i].quality_indicator == BT_HCI_LE_CS_TONE_QUALITY_UNAVAILABLE ||
 			local_tone_info[i].quality_indicator == BT_HCI_LE_CS_TONE_QUALITY_MED ||
 		    peer_tone_info[i].quality_indicator == BT_HCI_LE_CS_TONE_QUALITY_LOW ||
-		    peer_tone_info[i].quality_indicator == BT_HCI_LE_CS_TONE_QUALITY_UNAVAILABLE || 
-			peer_tone_info[i].quality_indicator == BT_HCI_LE_CS_TONE_QUALITY_MED) {
+		    peer_tone_info[i].quality_indicator == BT_HCI_LE_CS_TONE_QUALITY_UNAVAILABLE 
+			|| peer_tone_info[i].quality_indicator == BT_HCI_LE_CS_TONE_QUALITY_MED) {
 			iq_sample_channel_data[context->iq_sample_channel_data_index].failed = true;
 		}
 
@@ -277,7 +277,7 @@ static bool process_ranging_header(struct ras_ranging_header *ranging_header, vo
 }
 
 float estimate_distance(struct net_buf_simple *local_steps, struct net_buf_simple *peer_steps,
-		       uint8_t n_ap, enum bt_conn_le_cs_role role, uint16_t latest_compensation)
+		       uint8_t n_ap, enum bt_conn_le_cs_role role, uint16_t latest_compensation, int tag_idx)
 {
 	bool distance_measurement_failed = true;
 	struct processing_context context = {
@@ -318,7 +318,7 @@ float estimate_distance(struct net_buf_simple *local_steps, struct net_buf_simpl
 		// if (samples_cnt != 0) {
 			phase_slope_based_distance =  estimate_distance_coreaiot(
 				(struct iq_sample_and_channel_replica *)iq_sample_channel_data,
-				context.iq_sample_channel_data_index, i, &samples_cnt, latest_compensation,0);
+				context.iq_sample_channel_data_index, i, &samples_cnt, latest_compensation, tag_idx);
 		// }
 		
 		if (phase_slope_based_distance != 0.0f) {

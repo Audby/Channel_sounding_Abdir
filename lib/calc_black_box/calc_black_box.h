@@ -50,4 +50,4 @@ struct complex_sample {
 };
 
 float estimate_distance(struct net_buf_simple *local_steps, struct net_buf_simple *peer_steps,
-		       uint8_t n_ap, enum bt_conn_le_cs_role role,uint16_t compensation);
+		       uint8_t n_ap, enum bt_conn_le_cs_role role, uint16_t compensation, int tag_idx);

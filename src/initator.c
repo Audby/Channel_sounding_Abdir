@@ -10,6 +10,7 @@ static struct sync_handler cb = {
 void acquisition_thread() {
     float distance = 0;
     struct bt_conn *c = NULL;
+    int32_t loop_start = 0, loop_end = 0;
 
 	k_sem_take(&init_done_sem, K_FOREVER);
 
@@ -21,7 +22,8 @@ void acquisition_thread() {
 
 	printk("Connection ready. Starting measurement loop.\n");
 
-	while (true) {
+    while (true) {
+        if (PRINT_TIME) loop_start = k_uptime_get();
         if(!c)  { k_msleep(50); continue;}
 
         if(sync_reflector_busy()) { continue; }
@@ -34,6 +36,10 @@ void acquisition_thread() {
         // TRY(cs_stop_ranging(c)); 
         // TRY(cs_wait_disabled());
         TRY(sync_request_cs(ble_write, false));
+        if (PRINT_TIME) {
+            loop_end = k_uptime_get();
+            printk("[INIT][TIME] loop_total=%lld ms\n", (long long)(loop_end - loop_start));
+        }
 	}
 
 }

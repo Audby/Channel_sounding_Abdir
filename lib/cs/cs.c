@@ -1,4 +1,5 @@
 #include "cs.h"
+#include <zephyr/bluetooth/conn.h>
 
 #if BUILD_INITIATOR 
 struct cs_semaphores_ctx sem_cs; 
@@ -83,7 +84,7 @@ void remote_capabilities_cb(struct bt_conn *conn,
 	#endif  
 	ARG_UNUSED(params); 
 
-    printk("[CS] caps-complete: status=0x%02x conn=%d\n", status, bt_conn_index(conn));
+    if (PRINT_VERBOSE) printk("[CS] caps-complete: status=0x%02x conn=%d\n", status, bt_conn_index(conn));
     if (status == BT_HCI_ERR_SUCCESS) {
 		printk("CS capability exchange completed.\n");
 		TRY(bt_le_cs_set_default_settings(conn, &default_settings));
@@ -110,7 +111,7 @@ void security_enable_cb(struct bt_conn *conn, uint8_t status) {
 	ARG_UNUSED(conn); 
 	#endif  
 
-    printk("[CS] security: %s conn=%d\n", status==BT_HCI_ERR_SUCCESS?"enabled":"FAIL", bt_conn_index(conn));
+    if (PRINT_VERBOSE) printk("[CS] security: %s conn=%d\n", status==BT_HCI_ERR_SUCCESS?"enabled":"FAIL", bt_conn_index(conn));
     if (status == BT_HCI_ERR_SUCCESS) {
 		printk("CS security enabled.\n");
 
@@ -130,7 +131,7 @@ void config_create_cb(struct bt_conn *conn, uint8_t status, struct bt_conn_le_cs
 	ARG_UNUSED(conn); 
 	#endif  
 
-    printk("[CS] config-complete: status=0x%02x id=%d conn=%d\n", status, config->id, bt_conn_index(conn));
+    if (PRINT_VERBOSE) printk("[CS] config-complete: status=0x%02x id=%d conn=%d\n", status, config->id, bt_conn_index(conn));
     if (status == BT_HCI_ERR_SUCCESS) {
         printk("CS config creation complete. ID: %d\n", config->id);
 		#if BUILD_INITIATOR 
@@ -147,7 +148,7 @@ void config_create_cb(struct bt_conn *conn, uint8_t status, struct bt_conn_le_cs
 void procedure_enable_cb(struct bt_conn *conn, uint8_t status, struct bt_conn_le_cs_procedure_enable_complete *params) {
 	ARG_UNUSED(conn);
 
-    printk("[CS] proc-enable: status=0x%02x state=%u conn=%d\n", status, params?params->state:255, bt_conn_index(conn));
+    if (PRINT_VERBOSE) printk("[CS] proc-enable: status=0x%02x state=%u conn=%d\n", status, params?params->state:255, bt_conn_index(conn));
     if (status != BT_HCI_ERR_SUCCESS) {
 		printk("CS procedures enable failed. (HCI status 0x%02x)\n", status);
 
@@ -159,10 +160,10 @@ void procedure_enable_cb(struct bt_conn *conn, uint8_t status, struct bt_conn_le
 
 	if (params->state == 1) {
 		#if BUILD_REFLECTOR 
-		printk("CS procedures enabled conn %d.\n", bt_conn_index(conn)); 
+        if (PRINT_VERBOSE) printk("[CS] procedures enabled conn %d.\n", bt_conn_index(conn)); 
 		#endif  
 	} else {
-		printk("CS procedures disabled.\n");
+        if (PRINT_VERBOSE) printk("[CS] procedures disabled.\n");
 		#if BUILD_INITIATOR 
 		k_sem_give(&sem_cs.procedure_disabled); 
 		k_sem_give(&sem_cs.procedure_done);
@@ -182,7 +183,7 @@ void subevent_result_cb(struct bt_conn *conn, struct bt_conn_le_cs_subevent_resu
 		result->header.subevent_done_status != BT_CONN_LE_CS_SUBEVENT_ABORTED; 
 	
 
-    printk("[CS][INIT] subevent: pc=%u done=%u sub_done=%u n_ap=%u step_len=%d\n",
+    if (PRINT_VERBOSE) printk("[CS][INIT] subevent: pc=%u done=%u sub_done=%u n_ap=%u step_len=%d\n",
            result->header.procedure_counter,
            result->header.procedure_done_status,
            result->header.subevent_done_status,
@@ -194,7 +195,7 @@ void subevent_result_cb(struct bt_conn *conn, struct bt_conn_le_cs_subevent_resu
 			uint16_t len = result->step_data_buf->len;
 			uint8_t *step_data = net_buf_simple_pull_mem(result->step_data_buf, len);
 			net_buf_simple_add_mem(&latest_local_steps, step_data, len);
-            printk("[CS][INIT] buffered: local_steps=%d/%d\n", latest_local_steps.len, latest_local_steps.size);
+            if (PRINT_VERBOSE) printk("[CS][INIT] buffered: local_steps=%d/%d\n", latest_local_steps.len, latest_local_steps.size);
 		} else {
 			printk("Not enough memory to store step data. (%d > %d)\n",
 				latest_local_steps.len + result->step_data_buf->len,
@@ -222,7 +223,7 @@ void subevent_result_cb(struct bt_conn *conn, struct bt_conn_le_cs_subevent_resu
 }
 
 void ranging_data_ready_cb(struct bt_conn *conn, uint16_t ranging_counter) {
-    printk("[CS][INIT] RD ready: pc=%u conn=%d\n", ranging_counter, bt_conn_index(conn));
+    if (PRINT_VERBOSE) printk("[CS][INIT] RD ready: pc=%u conn=%d\n", ranging_counter, bt_conn_index(conn));
     counter.most_recent_peer_ranging = ranging_counter; 
 	k_sem_give(&sem_cs.rd_ready); 
 }
@@ -235,7 +236,7 @@ void ranging_data_get_complete_cb(struct bt_conn *conn, uint16_t ranging_counter
 			ranging_counter, err);
 	}
 
-    if (!err) printk("[CS][INIT] RD complete: pc=%u len=%d\n", ranging_counter, latest_peer_steps.len);
+    if (!err) { if (PRINT_VERBOSE) printk("[CS][INIT] RD complete: pc=%u len=%d\n", ranging_counter, latest_peer_steps.len); }
 	k_sem_give(&sem_cs.rd_complete); 
 }
 
@@ -358,7 +359,7 @@ void configure_cs_connection(struct bt_conn *conn) {
 	int err = 0; 
 	int idx = bt_conn_index(conn);
 
-    printk("[CS][REFL] configure: conn=%d default settings\n", bt_conn_index(conn));
+    if (PRINT_VERBOSE) printk("[CS][REFL] configure: conn=%d default settings\n", bt_conn_index(conn));
 	memset(&ctx[idx].counter, 0, sizeof(struct cs_count_ctx)); 
 	k_sem_reset(&ctx[idx].sem_cs.cs_security);
     k_sem_reset(&ctx[idx].sem_cs.rrq_capabilites);
@@ -376,7 +377,7 @@ int cs_start_ranging(struct bt_conn *conn) {
     counter.dropped_ranging = PROCEDURE_COUNTER_NONE;
 
 	struct bt_le_cs_procedure_enable_param enable = { .config_id = ID, .enable = true };
-    printk("[CS][INIT] start: conn=%d config_id=%d\n", bt_conn_index(conn), ID);
+    if (PRINT_VERBOSE) printk("[CS][INIT] start: conn=%d config_id=%d\n", bt_conn_index(conn), ID);
     return bt_le_cs_procedure_enable(conn, &enable);
 }
 
@@ -393,19 +394,25 @@ int cs_stop_ranging(struct bt_conn *conn) {
 }
 
 float cs_calc(struct bt_conn *conn) {
-	float distance = 0.0f; 
-	int32_t start = k_uptime_get();
-	int err;
+    float distance = 0.0f; 
+    int32_t total_start_ms = 0;
+    int32_t t0 = 0, t1 = 0;
+    if (PRINT_TIME) total_start_ms = k_uptime_get();
+    int err;
 
-    printk("[CS][INIT] calc: wait local-done, RD ready...\n");
-	err = k_sem_take(&sem_cs.procedure_done, K_SECONDS(1)); 
+    if (PRINT_VERBOSE) printk("[CS][INIT] calc: wait local-done, RD ready...\n");
+    if (PRINT_TIME) t0 = k_uptime_get();
+    err = k_sem_take(&sem_cs.procedure_done, K_SECONDS(1)); 
+    if (PRINT_TIME) { t1 = k_uptime_get(); printk("[CS][INIT][TIME] wait_procedure_done=%lld ms\n", (long long)(t1 - t0)); }
 	if (err) {
 		printk("Timeout waiting for local procedure done (err %d)\n", err); 
 		return err;  
 	}
 
-    printk("[CS][INIT] get RD: pc=%d\n", counter.most_recent_peer_ranging);
-	err = k_sem_take(&sem_cs.rd_ready, K_SECONDS(1));
+    if (PRINT_VERBOSE) printk("[CS][INIT] get RD: pc=%d\n", counter.most_recent_peer_ranging);
+    if (PRINT_TIME) t0 = k_uptime_get();
+    err = k_sem_take(&sem_cs.rd_ready, K_SECONDS(1));
+    if (PRINT_TIME) { t1 = k_uptime_get(); printk("[CS][INIT][TIME] wait_rd_ready=%lld ms\n", (long long)(t1 - t0)); }
 	if (err) {
 		printk("Timeout waiting for ranging data ready (err %d)\n", err);
 		return err;
@@ -419,14 +426,16 @@ float cs_calc(struct bt_conn *conn) {
 	}
 
     counter.ranging_data_err = 0;
-	err = bt_ras_rreq_cp_get_ranging_data(conn, &latest_peer_steps,
-			counter.most_recent_peer_ranging, ranging_data_get_complete_cb); 
+    if (PRINT_TIME) t0 = k_uptime_get();
+    err = bt_ras_rreq_cp_get_ranging_data(conn, &latest_peer_steps,
+            counter.most_recent_peer_ranging, ranging_data_get_complete_cb); 
     if (err) {
         printk("Failed to start getting ranging data (err %d)\n", err);
         return err;
     }
 
-	err = k_sem_take(&sem_cs.rd_complete, K_SECONDS(1));
+    err = k_sem_take(&sem_cs.rd_complete, K_SECONDS(1));
+    if (PRINT_TIME) { t1 = k_uptime_get(); printk("[CS][INIT][TIME] get_and_wait_rd_complete=%lld ms\n", (long long)(t1 - t0)); }
     if (err) {
         printk("Timeout waiting for ranging data completion (err %d)\n", err);
         return err;
@@ -436,10 +445,13 @@ float cs_calc(struct bt_conn *conn) {
         return counter.ranging_data_err;
     }
 
-	distance = estimate_distance(&latest_local_steps, &latest_peer_steps, counter.n_ap,
-				  BT_CONN_LE_CS_ROLE_INITIATOR, counter.latest_frequency_compensation);
-    printk("[CS][INIT] distance=%.3f m (n_ap=%u) total=%lld ms\n",
-           (double)distance, counter.n_ap, (long long)(k_uptime_get() - start));
+    const int tag_idx = bt_conn_index(conn);
+    if (PRINT_TIME) t0 = k_uptime_get();
+    distance = estimate_distance(&latest_local_steps, &latest_peer_steps, counter.n_ap,
+                  BT_CONN_LE_CS_ROLE_INITIATOR, counter.latest_frequency_compensation, tag_idx);
+    if (PRINT_TIME) { t1 = k_uptime_get(); printk("[CS][INIT][TIME] estimate_distance=%lld ms\n", (long long)(t1 - t0)); }
+    if (PRINT_VERBOSE && PRINT_TIME) printk("[CS][INIT] distance=%.3f m (n_ap=%u) total=%lld ms\n",
+           (double)distance, counter.n_ap, (long long)(k_uptime_get() - total_start_ms));
 	
 	return distance;
 }
