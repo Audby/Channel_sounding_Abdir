@@ -2,7 +2,7 @@
 
 #define ID 0
 #define PRINT_VERBOSE 0
-#define PRINT_TIME 0
+#define PRINT_TIME 1
 #define DE_SLIDING_WINDOW_SIZE (10)
 #define MAX_AP (CONFIG_BT_RAS_MAX_ANTENNA_PATHS)
 #define REFLECTOR_NAME "1234"
