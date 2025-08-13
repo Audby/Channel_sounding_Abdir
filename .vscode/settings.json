@@ -2,5 +2,9 @@
     "nrf-connect.applications": [
         "${workspaceFolder}\\projects\\initator_build",
         "${workspaceFolder}\\projects\\reflector_build"
-    ]
+    ],
+    "files.associations": {
+        "ble.h": "c",
+        "bluetooth.h": "c"
+    }
 }

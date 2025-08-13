@@ -1,11 +1,13 @@
 #include "sync.h"
 
-struct sync_handler sync_ctx; 
-#if BUILD_REFLECTOR 
-K_FIFO_DEFINE(sheduling_fifo); 
+struct sync_handler sync_ctx;
+#if BUILD_REFLECTOR
+/* --- REMOVED: Replaced by orchestration thread in ble.c ---
+K_FIFO_DEFINE(sheduling_fifo);
 K_THREAD_DEFINE(
     sync_thread, STACK_SIZE, scheduling_thread,
-    NULL, NULL, NULL, PRIO, 0, 0); 
+    NULL, NULL, NULL, PRIO, 0, 0);
+*/
 #endif 
 
 int sync_init(struct sync_handler *callback) {
@@ -26,47 +28,47 @@ void sync_update_led(bool val) {
     if (sync_ctx.led_cb)    sync_ctx.led_cb(val); 
 }
 
-#if BUILD_INITIATOR 
-int sync_request_cs(write_func_t write_fn, bool state) {
-    int err;
-    int backoff_ms = 4;
-    const int backoff_max_ms = 250;
+#if BUILD_INITIATOR
+// Keep sync_request_cs implementation for now, but it will be unused.
 
-    for(;;) {
-        while ((err = write_fn(state)) == -EBUSY) {
-            int jitter = (int)(k_cycle_get_32() & 0x7);
-            k_msleep(backoff_ms + jitter);
-            backoff_ms = (backoff_ms < backoff_max_ms) ? (backoff_ms << 1) : backoff_max_ms;
+// NEW: Function to signal completion (Write 0x00)
+int sync_signal_completion(write_func_t write_fn) {
+    int err;
+    // Perform the write and wait for the GATT confirmation.
+    // We use a simple retry loop for robustness against temporary stack busy states.
+
+    for (int attempt = 0; attempt < 5; attempt++) {
+        err = write_fn(false); // Write 0x00 (false)
+
+        if (err == -EBUSY) {
+            k_msleep(10);
+            continue;
         }
 
         if (err) {
-            int jitter = (int)(k_cycle_get_32() & 0x7);
-            k_msleep(backoff_ms + jitter);
-            backoff_ms = (backoff_ms < backoff_max_ms) ? (backoff_ms << 1) : backoff_max_ms;
-            continue;
+            printk("Write failed (err %d)\n", err);
+            return err;
         }
 
+        // Wait for GATT write callback (sem_write_done)
         k_sem_take(&sync_ctx.sem_write_done, K_FOREVER);
 
-        if (sync_ctx.att_err == BT_ATT_ERR_PREPARE_QUEUE_FULL ||
-            sync_ctx.att_err == BT_ATT_ERR_UNLIKELY) {
-            int jitter = (int)(k_cycle_get_32() & 0x7);
-            k_msleep(backoff_ms + jitter);
-            backoff_ms = (backoff_ms < backoff_max_ms) ? (backoff_ms << 1) : backoff_max_ms;
+        if (sync_ctx.att_err) {
+            printk("Completion write failed (ATT 0x%02x)\n", sync_ctx.att_err);
+            // If the reflector rejected it (e.g., we signaled completion after the reflector timed out).
+            if (sync_ctx.att_err == BT_ATT_ERR_UNLIKELY || sync_ctx.att_err == BT_ATT_ERR_PREPARE_QUEUE_FULL) {
+                 return -EIO;
+            }
+            // Retry on other transient errors
+            k_msleep(10);
             continue;
         }
 
-        backoff_ms = 4;
+        // Write successful
+        return 0;
+    }
 
-        if (sync_ctx.att_err) {  
-            printk("LED write failed (ATT 0x%02x)\n", sync_ctx.att_err);
-            return -EIO;
-        }
-        break;           
-    } 
-
-    k_sem_take(&sync_ctx.sem_reflector_ack, K_FOREVER);
-    return 0;
+    return -ETIMEDOUT;
 }
 #endif 
 
@@ -83,38 +85,11 @@ bool sync_reflector_busy() {
 /*                              THREADS                               */
 /**********************************************************************/
 
-#if BUILD_REFLECTOR 
-void scheduling_thread() {
-    printk("Started scheduling thread!\n"); 
-    k_sem_take(&sync_ctx.sem_sync_init_done, K_FOREVER); 
-
-    struct fifo_container *container; 
-    // int err = 0; 
-
-    while (true) {
-        container = k_fifo_get(&sheduling_fifo, K_FOREVER);
-        if (!container) continue; 
-        if (!container->conn) { k_free(container); continue; } 
-
-        switch (container->val) {
-            case 1: 
-                container->indicate_write_func(container->conn, container->val); 
-                break; 
-
-            case 0: 
-                container->indicate_write_func(container->conn, container->val); 
-                break; 
-            default: printk("WEIRD CASE? value %d", container->val); break; 
-        }
-
-        bt_conn_unref(container->conn); 
-        k_free(container); 
-    }
-}
-
-void sync_put_fifo(struct fifo_container *container) {
-    k_fifo_put(&sheduling_fifo, container); 
-}
+#if BUILD_REFLECTOR
+/* --- REMOVED ---
+void scheduling_thread() { ... }
+void sync_put_fifo(struct fifo_container *container) { ... }
+*/
 #endif 
 
 /**********************************************************************/
@@ -158,14 +133,16 @@ uint8_t sync_id_indicated(struct bt_conn *conn, struct bt_gatt_subscribe_params 
     }
 
     uint8_t received_value = *((uint8_t *)data);
-    // printk("Received SYNC_ID indication from server: %d\n", received_value);
 
-    #if BUILD_INITIATOR 
-        k_sem_give(&sync_ctx.sem_reflector_ack);
-    #endif 
-    
+    #if BUILD_INITIATOR
+    // We no longer rely on sem_reflector_ack for synchronization flow control.
+    // The start signal is handled via the led_cb chain.
+    // k_sem_give(&sync_ctx.sem_reflector_ack); // REMOVED
+    #endif
+
     /* Update local state */
     if (sync_ctx.led_cb) {
+        // This calls the callback defined in initator.c (initiator_sync_cb) to signal the acquisition thread.
         sync_ctx.led_cb(received_value ? true : false);
     }
     

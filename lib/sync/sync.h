@@ -40,22 +40,10 @@ struct sync_handler {
 }; 
 
 /** @brief Contains info about the current active CS initator */
-struct fifo_container {
-    void *fifo_reserved; 
-    configure_func_t configure_cs_func; 
-    indicate_func_t indicate_write_func;
-    struct bt_conn *conn; 
-    uint8_t val; 
-};
-
-#define FIFO_CONTAINER_DEFINE(name, cfg, ind, _conn, _val)        \
-    struct fifo_container *name = k_malloc(sizeof(*name));        \
-    if (name) {                                                   \
-        name->configure_cs_func    = (cfg);                       \
-        name->indicate_write_func  = (ind);                       \
-        name->val                  = (_val);                      \
-        name->conn                 = bt_conn_ref(_conn);          \
-    }
+/* --- REMOVED: FIFO container definitions are no longer needed. ---
+struct fifo_container { ... };
+#define FIFO_CONTAINER_DEFINE(...) ...
+*/
     
 /**********************************************************************/
 /*                              GENERAL                               */
@@ -63,15 +51,20 @@ struct fifo_container {
 ssize_t sync_write_id(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
 	const void *buf, uint16_t len, uint16_t offset, uint8_t flags); 
 int sync_init(struct sync_handler *callback);
-int sync_request_cs(write_func_t write_fn, bool state);
+// int sync_request_cs(write_func_t write_fn, bool state); // Keep for now, but unused in new flow
+#if BUILD_INITIATOR
+int sync_signal_completion(write_func_t write_fn); // NEW
+#endif
 void sync_update_led(bool val); 
 bool sync_reflector_busy(); 
 
 /**********************************************************************/
 /*                              THREADS                               */
 /**********************************************************************/
-void scheduling_thread(); 
-void sync_put_fifo(struct fifo_container *container); 
+/* --- REMOVED: Replaced by orchestration thread in ble.c ---
+void scheduling_thread();
+void sync_put_fifo(struct fifo_container *container);
+*/ 
 
 /**********************************************************************/
 /*                            CALLBACKS                               */

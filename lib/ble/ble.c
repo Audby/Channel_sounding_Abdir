@@ -7,15 +7,33 @@ extern atomic_t write_busy;
 
 
 #if BUILD_REFLECTOR
-static struct bt_conn *active_conn = NULL; 
-static bool indication_busy; 
-static int turn_idx = 0; 
+/* --- REMOVED (Replaced by reflector_sync_ctx) ---
+static struct bt_conn *active_conn = NULL;
+static bool indication_busy;
+static int turn_idx = 0;
+*/
+
+// NEW: Synchronization context for orchestration
+struct reflector_sync_ctx {
+    struct bt_conn *active_conn;
+    int turn_idx;
+    struct k_sem indication_complete; // Semaphore for indication completion (ACK received)
+    struct k_sem ranging_complete;    // Semaphore to signal orchestration thread that ranging finished
+} reflector_sync = {0};
+
+// Define stack and thread data for the new thread
+K_THREAD_STACK_DEFINE(orchestration_stack, 2048);
+struct k_thread orchestration_thread_data;
+
+// Forward declarations
+void orchestration_thread(void *p1, void *p2, void *p3);
+int ble_indicate_and_wait(struct bt_conn *conn, uint8_t val); 
 
 static const struct bt_le_conn_param ble_param = {
     .interval_min = 12, 
     .interval_max = 12, 
     .latency = 0, 
-    .timeout = 10,
+    .timeout = 400, // NEW: 4 seconds (400 * 10ms)
 }; 
 
 const static struct bt_le_scan_param search_param = {
@@ -28,15 +46,12 @@ const static struct bt_le_scan_param search_param = {
 static struct bt_scan_init_param scan_param = {
     .connect_if_match = true, 
     .scan_param = &search_param, 
-    // .conn_param = BT_LE_CONN_PARAM_DEFAULT,
     .conn_param = &ble_param,
 };
 
-struct cs_config_item {
-    void *fifo_reserved;  
-    struct bt_conn *conn;
-    bool enable;  // true = configure CS, false = cleanup CS
-};
+/* --- REMOVED: cs_config_item and FIFO usage are gone. ---
+struct cs_config_item { ... };
+*/
 #endif 
 
 #if BUILD_INITIATOR
@@ -148,9 +163,17 @@ void disconnected(struct bt_conn *conn, uint8_t reason) {
     printk("Disconnected from %s (reason 0x%02x)\n", addr, reason);
 
     #if BUILD_REFLECTOR
+    /* --- REMOVED ---
     if (conn == active_conn) {
-        active_conn = NULL; 
-        indication_busy = false; 
+        active_conn = NULL;
+        indication_busy = false;
+    }
+    */
+
+    // NEW: If the disconnected connection was the active one, unblock the orchestration thread.
+    if (conn == reflector_sync.active_conn) {
+        reflector_sync.active_conn = NULL;
+        k_sem_give(&reflector_sync.ranging_complete);
     }
 
     for(int i = 0; i < CONFIG_BT_MAX_CONN; i++) {
@@ -332,110 +355,175 @@ int ble_write(bool state) {
 }
 #endif 
 
-#if BUILD_REFLECTOR 
+#if BUILD_REFLECTOR
+// Updated indicate_done to signal the orchestration thread
 void indicate_done(struct bt_conn *conn,
 					struct bt_gatt_indicate_params *params,
 					uint8_t err) {
 
-    ARG_UNUSED(conn);
-    ARG_UNUSED(err);
-    ARG_UNUSED(params);
-    indication_busy = false; 
+    // ...
+    // indication_busy = false; // OLD
+
+    if (err) {
+        printk("Indication failed (err %d)\n", err);
+    }
+    // NEW: Signal that the indication confirmation (ACK) has been received (or failed).
+    k_sem_give(&reflector_sync.indication_complete);
 }
 #endif 
 
-ssize_t sync_write_id(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
+// Rewritten sync_write_id to handle completion signal (Write 0x00) only.
+ssize_t sync_write_id(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 	const void *buf, uint16_t len, uint16_t offset, uint8_t flags) {
 
-    if(len != 1U || offset != 0) {
-        printk("Illegal length or offset on SYNC_ID write.\n");
-        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    // ... (Validation checks) ...
+    uint8_t val = *((uint8_t *)buf);
+
+    // sync_update_led(val ? true : false); // OLD
+
+    // NEW: In this paradigm, Initiator only writes 0x00 to signal completion.
+    // The previous logic allowing 0x01 (acquire) is removed.
+    if(val != 0x00) {
+        printk("Incorrect write value: %d. Expecting 0x00.\n", val);
+        return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
     }
 
-    uint8_t val = *((uint8_t *)buf); 
-
-    if(val != 0x00 && val != 0x01) {  // Fix the printk error
-        printk("Incorrect write value: %d \n", val); 
-        return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED); 
-    }
-
-    sync_update_led(val ? true : false); 
+    sync_update_led(false); // Update LED based on completion
 
     #if BUILD_REFLECTOR
-    static uint8_t indicate_value;
-    indicate_value = val;
+    /* --- REMOVED (Old FIFO queuing logic) --- */
 
-    if (ble_info.conn_count)
-        turn_idx %= ble_info.conn_count;
-    
-    // if (conn != ble_info.connections[turn_idx] ||
-    //     ble_info.conn_count != CONFIG_BT_MAX_CONN) {
-    //     return BT_GATT_ERR(BT_ATT_ERR_PREPARE_QUEUE_FULL);
-    // }
-    if (conn != ble_info.connections[turn_idx]) {
-        return BT_GATT_ERR(BT_ATT_ERR_PREPARE_QUEUE_FULL);
+    // NEW: Check if this write comes from the expected active connection
+    if (conn != reflector_sync.active_conn) {
+        printk("Received completion signal from unexpected initiator.\n");
+
+        if (reflector_sync.active_conn == NULL) {
+            // Orchestration might have timed out already. Accept the write.
+            return len;
+        }
+        // Reject if it's clearly the wrong state.
+        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
     }
 
-    if (indicate_value == 0x01) {
-        
-        if (active_conn && active_conn != conn) {
-            return BT_GATT_ERR(BT_ATT_ERR_PREPARE_QUEUE_FULL);
-        }
-        if (indication_busy) {
-            return BT_GATT_ERR(BT_ATT_ERR_PREPARE_QUEUE_FULL);
-        }
+    // Ranging is complete for this initiator.
+    reflector_sync.active_conn = NULL;
 
-        active_conn = conn;
-        FIFO_CONTAINER_DEFINE(
-            c, configure_cs_connection, ble_indicate_write, conn, indicate_value
-        );
-        if (!c) { 
-            printk("CONTAINER WAS NULL :( \n"); 
-            return BT_GATT_ERR(BT_ATT_ERR_PREPARE_QUEUE_FULL); }
-        sync_put_fifo(c);
-    }
+    // Signal the orchestration thread to proceed to the next initiator.
+    k_sem_give(&reflector_sync.ranging_complete);
 
-    if (indicate_value == 0x00) {
-        if (conn != active_conn) {
-            return BT_GATT_ERR(BT_ATT_ERR_PREPARE_QUEUE_FULL);
-        }
-        
-        active_conn = NULL; 
-        turn_idx = (turn_idx + 1) % ble_info.conn_count; 
-        FIFO_CONTAINER_DEFINE(
-            c, configure_cs_connection, ble_indicate_write, conn, indicate_value
-        );
-        if (!c) { 
-            printk("CONTAINER WAS NULL :( \n"); 
-            return BT_GATT_ERR(BT_ATT_ERR_PREPARE_QUEUE_FULL); }
-        sync_put_fifo(c); 
-    }
     #endif
 
     return len;
 }
 
-#if BUILD_REFLECTOR 
-void ble_indicate_write(struct bt_conn *conn, uint8_t val) {
-    indication_busy = true; 
+#if BUILD_REFLECTOR
+/* --- REMOVED (Replaced by ble_indicate_and_wait) ---
+void ble_indicate_write(struct bt_conn *conn, uint8_t val) { ... }
+*/
 
-    static uint8_t p_val;
-    p_val = val;  
-    static struct bt_gatt_indicate_params p = {
-        .attr = &ble_sync_service.attrs[1],
-        .data = &p_val,
-        .len = sizeof(p_val),
-        .func = indicate_done,
-    };
-    
-    int ret = bt_gatt_indicate(conn, &p); 
+// NEW: Helper function to send indication and wait synchronously
+int ble_indicate_and_wait(struct bt_conn *conn, uint8_t val) {
+    // Using static params, assuming serialized access by the orchestration thread.
+    static struct bt_gatt_indicate_params indicate_params;
+    static uint8_t indicate_value;
+
+    indicate_value = val;
+
+    memset(&indicate_params, 0, sizeof(indicate_params));
+    // Ensure the attribute pointer points to the SYNC_ID characteristic 
+    indicate_params.attr = &ble_sync_service.attrs[1];
+    indicate_params.data = &indicate_value;
+    indicate_params.len = sizeof(indicate_value);
+    indicate_params.func = indicate_done;
+
+    int ret = bt_gatt_indicate(conn, &indicate_params);
 
     if (ret) {
-        printk("Failed to send LED state indication to connection %d (err %d)\n", 
-            bt_conn_index(conn), ret);
-        indication_busy = false;
-    } else {
-        printk("Wrote to conn %d state: %d\n", bt_conn_index(conn), p_val); 
+        printk("Failed to send indication (err %d)\n", ret);
+        return ret;
+    }
+
+    // Wait for the indication confirmation (ACK) from the client
+    ret = k_sem_take(&reflector_sync.indication_complete, K_SECONDS(1));
+    if (ret) {
+        printk("Timeout waiting for indication confirmation\n");
+        return ret;
+    }
+    return 0;
+}
+
+// NEW: The orchestration thread implementation
+void orchestration_thread(void *p1, void *p2, void *p3) {
+    printk("Reflector Orchestration Thread Started.\n");
+
+    while (true) {
+        // Wait until there is at least one connection
+        if (ble_info.conn_count == 0) {
+            k_msleep(100);
+            reflector_sync.turn_idx = 0; // Reset index when idle
+            continue;
+        }
+        
+        // Give initiator time to complete GATT discovery and subscription
+        // This prevents sending indications before the client is ready
+        k_msleep(10);
+
+        // 1. Find the next initiator (Round-Robin)
+        struct bt_conn *next_conn = NULL;
+        int start_idx = reflector_sync.turn_idx;
+
+        // Ensure index is within bounds
+        if (start_idx >= CONFIG_BT_MAX_CONN) {
+            start_idx = 0;
+        }
+
+        // Iterate through the connection slots to find the next active connection
+        for (int i = 0; i < CONFIG_BT_MAX_CONN; i++) {
+            int idx = (start_idx + i) % CONFIG_BT_MAX_CONN;
+            if (ble_info.connections[idx] != NULL) {
+                next_conn = ble_info.connections[idx];
+                reflector_sync.turn_idx = idx;
+                break;
+            }
+        }
+
+        if (!next_conn) {
+            k_msleep(10);
+            continue;
+        }
+
+        // 2. Signal the initiator (Indicate SYNC_ID = 1: Start Ranging)
+        reflector_sync.active_conn = next_conn;
+        k_sem_reset(&reflector_sync.ranging_complete); // Reset semaphore before starting
+
+        printk("Signaling initiator %d to start ranging...\n", reflector_sync.turn_idx);
+        int err = ble_indicate_and_wait(next_conn, 0x01);
+
+        if (err) {
+            printk("Failed to signal initiator %d (err %d). Retrying in 100ms.\n", reflector_sync.turn_idx, err);
+            // If signaling fails, clear active state and wait before retrying
+            reflector_sync.active_conn = NULL;
+            k_msleep(20); // Brief pause before retrying
+            continue; // Retry with same initiator
+        }
+
+        // 3. Wait for the initiator to complete ranging (signaled by sync_write_id).
+        // Use a timeout (e.g., 2 seconds) to prevent deadlock if an initiator fails.
+        err = k_sem_take(&reflector_sync.ranging_complete, K_SECONDS(2));
+
+        if (err) {
+            printk("Timeout waiting for initiator %d to complete ranging.\n", reflector_sync.turn_idx);
+        }
+
+        // 4. Advance the turn
+        if (reflector_sync.active_conn != NULL) {
+            // Ensure active_conn is cleared if timeout occurred or semaphore was released by disconnect.
+            reflector_sync.active_conn = NULL;
+        }
+
+        reflector_sync.turn_idx = (reflector_sync.turn_idx + 1) % CONFIG_BT_MAX_CONN;
+
+        k_yield(); // Allow other threads (like BLE stack) to run
     }
 }
 #endif 
@@ -516,6 +604,15 @@ int ble_setup_struct_and_types() {
     #if BUILD_REFLECTOR 
     memset(ble_info.connections, 0, sizeof(ble_info.connections)); 
     ble_info.conn_count = 0; 
+    // NEW: Initialize orchestration context and start the thread
+    k_sem_init(&reflector_sync.indication_complete, 0, 1);
+    k_sem_init(&reflector_sync.ranging_complete, 0, 1);
+
+    k_thread_create(&orchestration_thread_data, orchestration_stack,
+                    K_THREAD_STACK_SIZEOF(orchestration_stack),
+                    orchestration_thread,
+                    NULL, NULL, NULL,
+                    5, 0, K_NO_WAIT); // Priority 5
     #endif 
 
     #if BUILD_INITIATOR 

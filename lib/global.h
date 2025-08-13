@@ -2,7 +2,7 @@
 
 #define ID 0
 #define PRINT_VERBOSE 0
-#define PRINT_TIME 1
+#define PRINT_TIME 0
 #define DE_SLIDING_WINDOW_SIZE (10)
 #define MAX_AP (CONFIG_BT_RAS_MAX_ANTENNA_PATHS)
 #define REFLECTOR_NAME "1234"
@@ -11,7 +11,6 @@
 #define BUILD_REFLECTOR CONFIG_CS_BUILD_REFLECTOR
 #define USING_BLACK_BOX CONFIG_CS_BLACK_BOX_CALC
 #define PROCEDURE_COUNTER_NONE (-1)
-#define SLOT_DURATION 500
 
 #define LOCAL_PROCEDURE_MEM                                                                        \
 	((BT_RAS_MAX_STEPS_PER_PROCEDURE * sizeof(struct bt_le_cs_subevent_step)) +                \
