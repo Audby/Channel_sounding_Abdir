@@ -456,6 +456,15 @@ float cs_calc(struct bt_conn *conn) {
 	return distance;
 }
 
+float cs_calc_pseudo(struct bt_conn *conn) {
+    float distance = 0.0f;
+    const int tag_idx = bt_conn_index(conn);
+    distance = estimate_distance(&latest_local_steps, &latest_peer_steps, counter.n_ap,
+                                 BT_CONN_LE_CS_ROLE_INITIATOR, counter.latest_frequency_compensation, tag_idx);
+
+    return distance;
+}
+
 int cs_wait_disabled() {
 	return k_sem_take(&sem_cs.procedure_disabled, K_FOREVER); 
 }

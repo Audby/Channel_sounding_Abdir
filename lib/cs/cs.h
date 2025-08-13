@@ -24,6 +24,7 @@ void cs_reset_state(struct bt_conn *conn);
 void cs_reset_state(); 
 int cs_rreq_setup(struct bt_conn *conn); 
 float cs_calc(struct bt_conn *conn);
+float cs_calc_pseudo(struct bt_conn *conn);
 int cs_start_ranging(struct bt_conn *conn); 
 int cs_stop_ranging(struct bt_conn *conn);
 int cs_wait_disabled();

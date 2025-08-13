@@ -12,6 +12,9 @@
 #define USING_BLACK_BOX CONFIG_CS_BLACK_BOX_CALC
 #define PROCEDURE_COUNTER_NONE (-1)
 
+#define USE_PSEUDO 0 // Set to 1 to enable pseudo-data, 0 to disable
+#define PSEUDO_INJECTIONS_COUNT 1 // Number of pseudo-data injections between real data points
+
 #define LOCAL_PROCEDURE_MEM                                                                        \
 	((BT_RAS_MAX_STEPS_PER_PROCEDURE * sizeof(struct bt_le_cs_subevent_step)) +                \
 	 (BT_RAS_MAX_STEPS_PER_PROCEDURE * BT_RAS_MAX_STEP_DATA_LEN))

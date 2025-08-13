@@ -26,6 +26,7 @@ void acquisition_thread() {
     float distance = 0;
     struct bt_conn *c = NULL;
     int32_t loop_start = 0, loop_end = 0;
+    int sample_count = 0; // Add a counter for samples
 
 	k_sem_take(&init_done_sem, K_FOREVER);
 
@@ -55,6 +56,21 @@ void acquisition_thread() {
 	    cs_reset_state();
         TRY(cs_start_ranging(c));
         distance = cs_calc(c);
+        
+        // Signal completion (Write 0x00)
+        TRY(sync_signal_completion(ble_write));
+
+#if USE_PSEUDO
+        if (sample_count > 10) {
+            for (int i = 0; i < PSEUDO_INJECTIONS_COUNT; i++) {
+                k_msleep(100); // Wait for half the time between real measurements
+                float pseudo_distance = cs_calc_pseudo(c);
+                // printk("Distance: %.2f m (pseudo)\n", pseudo_distance);
+            }
+        } else {
+            sample_count++;
+        }
+#endif
         // TRY(cs_stop_ranging(c));
         // TRY(cs_wait_disabled());
 
@@ -63,7 +79,7 @@ void acquisition_thread() {
         */
 
         // Signal completion (Write 0x00)
-        TRY(sync_signal_completion(ble_write));
+        // TRY(sync_signal_completion(ble_write));
 
         if (PRINT_TIME) {
             loop_end = k_uptime_get();
