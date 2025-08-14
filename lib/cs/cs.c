@@ -1,5 +1,6 @@
 #include "cs.h"
 #include <zephyr/bluetooth/conn.h>
+#include <string.h>
 
 #if BUILD_INITIATOR 
 struct cs_semaphores_ctx sem_cs; 
@@ -40,6 +41,12 @@ static const struct bt_le_cs_set_procedure_parameters_param procedure_params = {
 
 __aligned(4) NET_BUF_SIMPLE_DEFINE_STATIC(latest_local_steps, LOCAL_PROCEDURE_MEM);
 __aligned(4) NET_BUF_SIMPLE_DEFINE_STATIC(latest_peer_steps, BT_RAS_PROCEDURE_MEM);
+
+/* Snapshots of the latest step-data for re-use during pseudo calculations */
+__aligned(4) static uint8_t saved_local_steps_mem[LOCAL_PROCEDURE_MEM];
+__aligned(4) static uint8_t saved_peer_steps_mem[BT_RAS_PROCEDURE_MEM];
+static uint16_t saved_local_steps_len;
+static uint16_t saved_peer_steps_len;
 #endif 
 
 #if BUILD_REFLECTOR 
@@ -375,6 +382,8 @@ int cs_start_ranging(struct bt_conn *conn) {
 	net_buf_simple_reset(&latest_local_steps);
     net_buf_simple_reset(&latest_peer_steps);
     counter.dropped_ranging = PROCEDURE_COUNTER_NONE;
+    saved_local_steps_len = 0;
+    saved_peer_steps_len = 0;
 
 	struct bt_le_cs_procedure_enable_param enable = { .config_id = ID, .enable = true };
     if (PRINT_VERBOSE) printk("[CS][INIT] start: conn=%d config_id=%d\n", bt_conn_index(conn), ID);
@@ -447,6 +456,23 @@ float cs_calc(struct bt_conn *conn) {
 
     const int tag_idx = bt_conn_index(conn);
     if (PRINT_TIME) t0 = k_uptime_get();
+    /*
+     * Snapshot the current step buffers BEFORE parsing so we can re-feed the
+     * exact same data for pseudo calculations. The parser may consume buffers.
+     */
+    if (latest_local_steps.len <= sizeof(saved_local_steps_mem)) {
+        memcpy(saved_local_steps_mem, latest_local_steps.data, latest_local_steps.len);
+        saved_local_steps_len = latest_local_steps.len;
+    } else {
+        saved_local_steps_len = 0;
+    }
+    if (latest_peer_steps.len <= sizeof(saved_peer_steps_mem)) {
+        memcpy(saved_peer_steps_mem, latest_peer_steps.data, latest_peer_steps.len);
+        saved_peer_steps_len = latest_peer_steps.len;
+    } else {
+        saved_peer_steps_len = 0;
+    }
+
     distance = estimate_distance(&latest_local_steps, &latest_peer_steps, counter.n_ap,
                   BT_CONN_LE_CS_ROLE_INITIATOR, counter.latest_frequency_compensation, tag_idx);
     if (PRINT_TIME) { t1 = k_uptime_get(); printk("[CS][INIT][TIME] estimate_distance=%lld ms\n", (long long)(t1 - t0)); }
@@ -459,6 +485,22 @@ float cs_calc(struct bt_conn *conn) {
 float cs_calc_pseudo(struct bt_conn *conn) {
     float distance = 0.0f;
     const int tag_idx = bt_conn_index(conn);
+    /* Restore snapshots into working buffers so the parser sees valid data */
+    if (saved_local_steps_len == 0 || saved_peer_steps_len == 0) {
+        return 0.0f;
+    }
+
+    net_buf_simple_reset(&latest_local_steps);
+    net_buf_simple_reset(&latest_peer_steps);
+
+    if (saved_local_steps_len <= latest_local_steps.size &&
+        saved_peer_steps_len <= latest_peer_steps.size) {
+        net_buf_simple_add_mem(&latest_local_steps, saved_local_steps_mem, saved_local_steps_len);
+        net_buf_simple_add_mem(&latest_peer_steps, saved_peer_steps_mem, saved_peer_steps_len);
+    } else {
+        return 0.0f;
+    }
+
     distance = estimate_distance(&latest_local_steps, &latest_peer_steps, counter.n_ap,
                                  BT_CONN_LE_CS_ROLE_INITIATOR, counter.latest_frequency_compensation, tag_idx);
 

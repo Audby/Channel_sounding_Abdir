@@ -466,7 +466,7 @@ void orchestration_thread(void *p1, void *p2, void *p3) {
         
         // Give initiator time to complete GATT discovery and subscription
         // This prevents sending indications before the client is ready
-        k_msleep(5);
+        k_msleep(12);
 
         // 1. Find the next initiator (Round-Robin)
         struct bt_conn *next_conn = NULL;
