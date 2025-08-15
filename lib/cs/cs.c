@@ -10,7 +10,7 @@ static struct bt_le_cs_create_config_params config_params = {
     .id = ID,
     .main_mode_type = BT_CONN_LE_CS_MAIN_MODE_2, 
     .sub_mode_type = BT_CONN_LE_CS_SUB_MODE_1, 
-    .min_main_mode_steps = 3, 
+    .min_main_mode_steps = 2, 
     .max_main_mode_steps = 5, 
     .main_mode_repetition = 0,
     .mode_0_steps = 1,
@@ -23,14 +23,16 @@ static struct bt_le_cs_create_config_params config_params = {
     .ch3c_jump = 2,
 };
 
+// CI >= N * Spacing (CONFIG_[...]_ACL_EVENT_SPACING_DEFAULT)
+// Spacing >= T_ACL + T_CS (TCL = CONFIG_[...]_EVENT_LEN_DEFAULT, T_CS = max_procedure_len)
 static const struct bt_le_cs_set_procedure_parameters_param procedure_params = {
 	.config_id = ID,
-	.max_procedure_len = 12,
+	.max_procedure_len = 8,
 	.min_procedure_interval = 2,
 	.max_procedure_interval = 5, 
 	.max_procedure_count = 1,
-	.min_subevent_len = 2000,
-	.max_subevent_len = 4000,
+	.min_subevent_len = 1500,
+	.max_subevent_len = 3000,
 	.tone_antenna_config_selection = BT_LE_CS_TONE_ANTENNA_CONFIGURATION_A1_B1,
 	.phy = BT_LE_CS_PROCEDURE_PHY_2M, 
 	.tx_power_delta = 0x80,

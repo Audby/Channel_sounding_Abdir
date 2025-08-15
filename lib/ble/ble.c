@@ -7,13 +7,7 @@ extern atomic_t write_busy;
 
 
 #if BUILD_REFLECTOR
-/* --- REMOVED (Replaced by reflector_sync_ctx) ---
-static struct bt_conn *active_conn = NULL;
-static bool indication_busy;
-static int turn_idx = 0;
-*/
-
-// NEW: Synchronization context for orchestration
+// Synchronization context for orchestration
 struct reflector_sync_ctx {
     struct bt_conn *active_conn;
     int turn_idx;
@@ -30,10 +24,10 @@ void orchestration_thread(void *p1, void *p2, void *p3);
 int ble_indicate_and_wait(struct bt_conn *conn, uint8_t val); 
 
 static const struct bt_le_conn_param ble_param = {
-    .interval_min = 12, 
-    .interval_max = 12, 
+    .interval_min = 6, 
+    .interval_max = 6, 
     .latency = 0, 
-    .timeout = 400, // NEW: 4 seconds (400 * 10ms)
+    .timeout = 400,
 }; 
 
 const static struct bt_le_scan_param search_param = {
@@ -49,9 +43,6 @@ static struct bt_scan_init_param scan_param = {
     .conn_param = &ble_param,
 };
 
-/* --- REMOVED: cs_config_item and FIFO usage are gone. ---
-struct cs_config_item { ... };
-*/
 #endif 
 
 #if BUILD_INITIATOR
@@ -466,7 +457,7 @@ void orchestration_thread(void *p1, void *p2, void *p3) {
         
         // Give initiator time to complete GATT discovery and subscription
         // This prevents sending indications before the client is ready
-        k_msleep(12);
+        // k_msleep(30);
 
         // 1. Find the next initiator (Round-Robin)
         struct bt_conn *next_conn = NULL;

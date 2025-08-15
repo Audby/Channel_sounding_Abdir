@@ -5,6 +5,7 @@
     ],
     "files.associations": {
         "ble.h": "c",
-        "bluetooth.h": "c"
+        "bluetooth.h": "c",
+        "iterator": "c"
     }
 }
