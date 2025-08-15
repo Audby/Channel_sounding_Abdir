@@ -14,9 +14,8 @@ int main(void) {
   printk("Starting Nordic CS Reflector...\n");
 
   TRY_RETURN(sync_init(&cb));
-  ble_init(); // This now starts the orchestration thread internally via ble_setup_struct_and_types()
+  ble_init(); // Starts orchestration_thread()
 
-  // Main loop can sleep or handle other tasks.
   while (true) {
     k_msleep(100);
   }

@@ -11,7 +11,7 @@ extern atomic_t write_busy;
 struct reflector_sync_ctx {
     struct bt_conn *active_conn;
     int turn_idx;
-    struct k_sem indication_complete; // Semaphore for indication completion (ACK received)
+    struct k_sem indication_complete; // Semaphore for indication completion
     struct k_sem ranging_complete;    // Semaphore to signal orchestration thread that ranging finished
 } reflector_sync = {0};
 
@@ -154,14 +154,8 @@ void disconnected(struct bt_conn *conn, uint8_t reason) {
     printk("Disconnected from %s (reason 0x%02x)\n", addr, reason);
 
     #if BUILD_REFLECTOR
-    /* --- REMOVED ---
-    if (conn == active_conn) {
-        active_conn = NULL;
-        indication_busy = false;
-    }
-    */
 
-    // NEW: If the disconnected connection was the active one, unblock the orchestration thread.
+    // If the disconnected connection was the active one, unblock the orchestration thread.
     if (conn == reflector_sync.active_conn) {
         reflector_sync.active_conn = NULL;
         k_sem_give(&reflector_sync.ranging_complete);
@@ -179,7 +173,7 @@ void disconnected(struct bt_conn *conn, uint8_t reason) {
     }
 
     if (ble_info.conn_count < CONFIG_BT_MAX_CONN) {
-        TRY(bt_scan_start(BT_SCAN_TYPE_SCAN_ACTIVE)); // TODO: Better check to stop starting in cases where its still on
+        TRY(bt_scan_start(BT_SCAN_TYPE_SCAN_ACTIVE));
         ble_update_state(ACTIVE_SCAN); 
     } 
     #endif 
@@ -218,7 +212,7 @@ void dm_completed(struct bt_gatt_dm *dm, void *context) {
 
     bt_gatt_dm_data_print(dm);
 
-    /* Subscribing to SYNC_SERIVICE */
+    // Subscribing to SYNC_SERIVICE
     if (context != NULL) {
         static struct bt_uuid_128 sync_id_uuid_inst = BT_UUID_INIT_128(SYNC_ID_UUID_VAL);
         
@@ -352,13 +346,10 @@ void indicate_done(struct bt_conn *conn,
 					struct bt_gatt_indicate_params *params,
 					uint8_t err) {
 
-    // ...
-    // indication_busy = false; // OLD
-
     if (err) {
         printk("Indication failed (err %d)\n", err);
     }
-    // NEW: Signal that the indication confirmation (ACK) has been received (or failed).
+    // Signal that the indication confirmation has been received (or failed).
     k_sem_give(&reflector_sync.indication_complete);
 }
 #endif 
@@ -370,21 +361,17 @@ ssize_t sync_write_id(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     // ... (Validation checks) ...
     uint8_t val = *((uint8_t *)buf);
 
-    // sync_update_led(val ? true : false); // OLD
-
-    // NEW: In this paradigm, Initiator only writes 0x00 to signal completion.
-    // The previous logic allowing 0x01 (acquire) is removed.
+    // Initiator writes 0x00 to signal completion.
     if(val != 0x00) {
         printk("Incorrect write value: %d. Expecting 0x00.\n", val);
         return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
     }
 
-    sync_update_led(false); // Update LED based on completion
+    sync_update_led(false);
 
     #if BUILD_REFLECTOR
-    /* --- REMOVED (Old FIFO queuing logic) --- */
 
-    // NEW: Check if this write comes from the expected active connection
+    // Check if this write comes from the expected active connection
     if (conn != reflector_sync.active_conn) {
         printk("Received completion signal from unexpected initiator.\n");
 
@@ -408,13 +395,9 @@ ssize_t sync_write_id(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 }
 
 #if BUILD_REFLECTOR
-/* --- REMOVED (Replaced by ble_indicate_and_wait) ---
-void ble_indicate_write(struct bt_conn *conn, uint8_t val) { ... }
-*/
 
-// NEW: Helper function to send indication and wait synchronously
+// Helper function to send indication and wait synchronously
 int ble_indicate_and_wait(struct bt_conn *conn, uint8_t val) {
-    // Using static params, assuming serialized access by the orchestration thread.
     static struct bt_gatt_indicate_params indicate_params;
     static uint8_t indicate_value;
 
@@ -434,7 +417,7 @@ int ble_indicate_and_wait(struct bt_conn *conn, uint8_t val) {
         return ret;
     }
 
-    // Wait for the indication confirmation (ACK) from the client
+    // Wait for the indication confirmation from the client
     ret = k_sem_take(&reflector_sync.indication_complete, K_SECONDS(1));
     if (ret) {
         printk("Timeout waiting for indication confirmation\n");
@@ -443,7 +426,7 @@ int ble_indicate_and_wait(struct bt_conn *conn, uint8_t val) {
     return 0;
 }
 
-// NEW: The orchestration thread implementation
+// The orchestration thread implementation
 void orchestration_thread(void *p1, void *p2, void *p3) {
     printk("Reflector Orchestration Thread Started.\n");
 

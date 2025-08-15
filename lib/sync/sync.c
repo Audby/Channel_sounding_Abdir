@@ -1,14 +1,6 @@
 #include "sync.h"
 
 struct sync_handler sync_ctx;
-#if BUILD_REFLECTOR
-/* --- REMOVED: Replaced by orchestration thread in ble.c ---
-K_FIFO_DEFINE(sheduling_fifo);
-K_THREAD_DEFINE(
-    sync_thread, STACK_SIZE, scheduling_thread,
-    NULL, NULL, NULL, PRIO, 0, 0);
-*/
-#endif 
 
 int sync_init(struct sync_handler *callback) {
     if (callback) {
@@ -29,16 +21,10 @@ void sync_update_led(bool val) {
 }
 
 #if BUILD_INITIATOR
-// Keep sync_request_cs implementation for now, but it will be unused.
-
-// NEW: Function to signal completion (Write 0x00)
 int sync_signal_completion(write_func_t write_fn) {
     int err;
-    // Perform the write and wait for the GATT confirmation.
-    // We use a simple retry loop for robustness against temporary stack busy states.
-
     for (int attempt = 0; attempt < 5; attempt++) {
-        err = write_fn(false); // Write 0x00 (false)
+        err = write_fn(false);
 
         if (err == -EBUSY) {
             k_msleep(10);
@@ -50,21 +36,17 @@ int sync_signal_completion(write_func_t write_fn) {
             return err;
         }
 
-        // Wait for GATT write callback (sem_write_done)
+        // Wait for GATT write callback
         k_sem_take(&sync_ctx.sem_write_done, K_FOREVER);
 
         if (sync_ctx.att_err) {
             printk("Completion write failed (ATT 0x%02x)\n", sync_ctx.att_err);
-            // If the reflector rejected it (e.g., we signaled completion after the reflector timed out).
             if (sync_ctx.att_err == BT_ATT_ERR_UNLIKELY || sync_ctx.att_err == BT_ATT_ERR_PREPARE_QUEUE_FULL) {
                  return -EIO;
             }
-            // Retry on other transient errors
             k_msleep(10);
             continue;
         }
-
-        // Write successful
         return 0;
     }
 
@@ -80,17 +62,6 @@ void sync_reflector_ack_cb(bool state) {
 bool sync_reflector_busy() {
     return !atomic_cas(&sync_ctx.write_busy, 0, 1); 
 }
-
-/**********************************************************************/
-/*                              THREADS                               */
-/**********************************************************************/
-
-#if BUILD_REFLECTOR
-/* --- REMOVED ---
-void scheduling_thread() { ... }
-void sync_put_fifo(struct fifo_container *container) { ... }
-*/
-#endif 
 
 /**********************************************************************/
 /*                            CALLBACKS                               */
@@ -134,15 +105,9 @@ uint8_t sync_id_indicated(struct bt_conn *conn, struct bt_gatt_subscribe_params 
 
     uint8_t received_value = *((uint8_t *)data);
 
-    #if BUILD_INITIATOR
-    // We no longer rely on sem_reflector_ack for synchronization flow control.
-    // The start signal is handled via the led_cb chain.
-    // k_sem_give(&sync_ctx.sem_reflector_ack); // REMOVED
-    #endif
-
-    /* Update local state */
+    // Update local state
     if (sync_ctx.led_cb) {
-        // This calls the callback defined in initator.c (initiator_sync_cb) to signal the acquisition thread.
+        // Call callback in initiator.c to signal acquisition_thread()
         sync_ctx.led_cb(received_value ? true : false);
     }
     

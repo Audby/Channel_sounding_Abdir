@@ -44,11 +44,13 @@ static const struct bt_le_cs_set_procedure_parameters_param procedure_params = {
 __aligned(4) NET_BUF_SIMPLE_DEFINE_STATIC(latest_local_steps, LOCAL_PROCEDURE_MEM);
 __aligned(4) NET_BUF_SIMPLE_DEFINE_STATIC(latest_peer_steps, BT_RAS_PROCEDURE_MEM);
 
-/* Snapshots of the latest step-data for re-use during pseudo calculations */
+#if USE_PSEUDO
 __aligned(4) static uint8_t saved_local_steps_mem[LOCAL_PROCEDURE_MEM];
 __aligned(4) static uint8_t saved_peer_steps_mem[BT_RAS_PROCEDURE_MEM];
 static uint16_t saved_local_steps_len;
 static uint16_t saved_peer_steps_len;
+#endif
+
 #endif 
 
 #if BUILD_REFLECTOR 
@@ -312,8 +314,7 @@ void cs_reset_state() {
 	k_sem_reset(&sem_cs.local_steps);
 	k_sem_reset(&sem_cs.rd_ready);
 	k_sem_reset(&sem_cs.rd_complete);
-	k_sem_reset(&sem_cs.procedure_done);
-	// k_sem_reset(&sem_cs.procedure_disabled); 
+	k_sem_reset(&sem_cs.procedure_done); 
 }
 
 int cs_rreq_setup(struct bt_conn *conn) {
@@ -384,8 +385,10 @@ int cs_start_ranging(struct bt_conn *conn) {
 	net_buf_simple_reset(&latest_local_steps);
     net_buf_simple_reset(&latest_peer_steps);
     counter.dropped_ranging = PROCEDURE_COUNTER_NONE;
+	#if USE_PSEUDO
     saved_local_steps_len = 0;
     saved_peer_steps_len = 0;
+	#endif
 
 	struct bt_le_cs_procedure_enable_param enable = { .config_id = ID, .enable = true };
     if (PRINT_VERBOSE) printk("[CS][INIT] start: conn=%d config_id=%d\n", bt_conn_index(conn), ID);
@@ -458,10 +461,8 @@ float cs_calc(struct bt_conn *conn) {
 
     const int tag_idx = bt_conn_index(conn);
     if (PRINT_TIME) t0 = k_uptime_get();
-    /*
-     * Snapshot the current step buffers BEFORE parsing so we can re-feed the
-     * exact same data for pseudo calculations. The parser may consume buffers.
-     */
+    
+	#if USE_PSEUDO
     if (latest_local_steps.len <= sizeof(saved_local_steps_mem)) {
         memcpy(saved_local_steps_mem, latest_local_steps.data, latest_local_steps.len);
         saved_local_steps_len = latest_local_steps.len;
@@ -474,6 +475,7 @@ float cs_calc(struct bt_conn *conn) {
     } else {
         saved_peer_steps_len = 0;
     }
+	#endif
 
     distance = estimate_distance(&latest_local_steps, &latest_peer_steps, counter.n_ap,
                   BT_CONN_LE_CS_ROLE_INITIATOR, counter.latest_frequency_compensation, tag_idx);
@@ -484,6 +486,7 @@ float cs_calc(struct bt_conn *conn) {
 	return distance;
 }
 
+#if USE_PSEUDO
 float cs_calc_pseudo(struct bt_conn *conn) {
     float distance = 0.0f;
     const int tag_idx = bt_conn_index(conn);
@@ -508,6 +511,7 @@ float cs_calc_pseudo(struct bt_conn *conn) {
 
     return distance;
 }
+#endif
 
 int cs_wait_disabled() {
 	return k_sem_take(&sem_cs.procedure_disabled, K_FOREVER); 
